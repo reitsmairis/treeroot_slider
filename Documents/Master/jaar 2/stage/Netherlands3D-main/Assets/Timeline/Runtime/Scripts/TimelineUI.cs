@@ -35,8 +35,6 @@ namespace Netherlands3D.Timeline
         public TimeBar[] timeBars = new TimeBar[3];
         [Tooltip("The input field of the current date")]
         public TMP_InputField inputFieldCurrentDate;
-        [Tooltip("The button that allows for auto scroll")]
-        public TextMeshProUGUI playButtonField;
         [Tooltip("For changing the playback speed")]
         public TMP_InputField inputFieldPlaySpeed;
 
@@ -48,9 +46,10 @@ namespace Netherlands3D.Timeline
         [SerializeField] private Transform parentLayersUI;
         [SerializeField] private ScrollRect scrollRectTimePeriodLayers;
         [SerializeField] private ScrollRect scrollRectLayers;
+        public TimelinePlayback playback;
 
         [Header("Time Scrubber Components")]
-        [SerializeField] private TimeScrubber timeScrubber;
+        public TimeScrubber timeScrubber;
 
         /// <summary>
         /// Unity Event that gets triggerd when the currentDate is changed
@@ -82,10 +81,6 @@ namespace Netherlands3D.Timeline
         /// </summary>
         private bool currentDateIsSet;
         /// <summary>
-        /// Is the time line currently automaticly playing (scrolling)
-        /// </summary>
-        private bool isAutomaticlyPlaying;
-        /// <summary>
         /// Is the user dragging its mouse on the time bar?
         /// </summary>
         private bool mouseIsDragging;
@@ -98,9 +93,15 @@ namespace Netherlands3D.Timeline
         /// </summary>
         private bool hasSendPointerEventData;
         /// <summary>
+        /// For skipping through timePeriods
+        /// </summary>
+        private int skipIndex = -1;
+        /// <summary>
         /// Array int holding the order of the indexes of timeBars in which they appear/move
         /// </summary>
         private int[] barIndexes;
+
+        private float scrollSpeed;
         /// <summary>
         /// The time unit used for the timeline
         /// </summary>
@@ -124,15 +125,7 @@ namespace Netherlands3D.Timeline
         /// <summary>
         /// The most visable date right
         /// </summary>
-        private DateTime visableDateRight;
-        /// <summary>
-        /// Enumerator for ScrollTimeBarAutomaticly
-        /// </summary>
-        private Coroutine coroutineScrollTimeBarAutomaticly;
-        /// <summary>
-        /// Coroutine for ScrollScrubberAutomaticly
-        /// </summary>
-        private Coroutine coroutineScrollScrubberAutomaticly;
+        private DateTime visableDateRight;        
         /// <summary>
         /// List of all categories scripts
         /// </summary>
@@ -180,6 +173,14 @@ namespace Netherlands3D.Timeline
         }
 
         #region Timeline
+
+        /// <summary>
+        /// Clear the timeline data
+        /// </summary>
+        public void ClearData()
+        {
+            timelineData.ClearData();
+        }
 
         /// <summary>
         /// Get the closest bar based on the local x position
@@ -259,46 +260,7 @@ namespace Netherlands3D.Timeline
             {
                 UpdateCurrentDateVisual();
             }
-        }
-
-        /// <summary>
-        /// Toggle to play the timeline automaticly or not
-        /// </summary>
-        public void TogglePlay()
-        {
-            // Based on if the time scrubber is in use or not play the time bar or the time scrubber
-            isAutomaticlyPlaying = !isAutomaticlyPlaying;
-            PlayScroll(isAutomaticlyPlaying);
-        }
-
-        /// <summary>
-        /// Play the automatic scrolling of the timeline/scrubber
-        /// </summary>
-        /// <param name="autoPlay"></param>
-        public void PlayScroll(bool autoPlay)
-        {
-            isAutomaticlyPlaying = autoPlay;
-            if(isAutomaticlyPlaying)
-            {
-                playButtonField.text = "Stop";
-                // Check if timeline or time scrubber
-                if(timeScrubber.IsActive)
-                {
-                    // Use timescrubber
-                    coroutineScrollScrubberAutomaticly = StartCoroutine(ScrollTimeScrubberAutomaticly());
-                }
-                else
-                {
-                    // Use timeline
-                    coroutineScrollTimeBarAutomaticly = StartCoroutine(ScrollTimeBarAutomaticly());
-                }
-            }
-            else
-            {
-                playButtonField.text = "Play";
-                if(coroutineScrollTimeBarAutomaticly != null) StopCoroutine(coroutineScrollTimeBarAutomaticly);
-                if(coroutineScrollScrubberAutomaticly != null) StopCoroutine(coroutineScrollScrubberAutomaticly);
-            }
+            timeScrubber.StoppedUsing();
         }
 
         /// <summary>
@@ -402,6 +364,32 @@ namespace Netherlands3D.Timeline
             UpdateCurrentDateVisual();
         }
 
+        /// <summary>
+        /// Skip the timeline to the next time period
+        /// </summary>
+        /// <param name="forward"></param>
+        public void SkipToNextTimePeriod(bool forward)
+        {
+            // This stuff feels like spagetti but it works
+            List<TimePeriod> timePeriods = timelineData.allTimePeriods;
+            timePeriods.Sort((x, y) => x.CompareTo(y));
+            // Get the next time period
+            if(skipIndex == -1)
+            {
+                var closestTimePeriod = ArrayExtention.MinBy(timelineData.allTimePeriods, x => Math.Abs((x.startDate - CurrentDate).Ticks));
+                skipIndex = timePeriods.IndexOf(closestTimePeriod);
+            }
+
+            // Forward / backwards
+            skipIndex += forward ? 1 : -1;
+            if(skipIndex >= timePeriods.Count)
+                skipIndex = 0;
+            if(skipIndex < 0) skipIndex = timePeriods.Count - 1;
+
+            // Skip
+            SetCurrentDate(timePeriods[skipIndex].startDate);
+        }
+
 
         /// <summary>
         /// Get the local x position of a date from the timeBars
@@ -417,7 +405,7 @@ namespace Netherlands3D.Timeline
             for(int i = 0; i < timeBars.Length; i++)
             {
                 float value = timeBars[i].GetDatePosition(dateTime, timeUnit);
-                if(value == 0.123f) continue;
+                if(value == 0.123f) continue; // Not found
                 else
                 {
                     // Found local x value of date in timebar
@@ -472,6 +460,20 @@ namespace Netherlands3D.Timeline
         }
 
         /// <summary>
+        /// Get all the datetimes stored in the time bars
+        /// </summary>
+        /// <returns></returns>
+        private DateTime[] GetTimeBarDateTimes()
+        {
+            List<DateTime> dateTimes = new List<DateTime>();
+            for(int i = 0; i < timeBars.Length; i++)
+            {
+                dateTimes.AddRange(timeBars[i].dateTimePositions.Values.ToList());
+            }
+            return dateTimes.ToArray();
+        }
+
+        /// <summary>
         /// Check if the event is visible in the visable date range
         /// </summary>
         /// <param name="dEvent">The even to check</param>
@@ -502,33 +504,7 @@ namespace Netherlands3D.Timeline
             TimeBar t2 = timeBars[barIndexes[2]];
             t2.transform.localPosition = new Vector3(localPosX + TimeBarParentWidth, t2.transform.localPosition.y, t2.transform.localPosition.z);
         }
-
-        /// <summary>
-        /// Scroll the timebar automaticly
-        /// </summary>
-        /// <returns></returns>
-        private IEnumerator ScrollTimeBarAutomaticly()
-        {
-            while(true)
-            {
-                ScrollTimeBar(-100 * int.Parse(inputFieldPlaySpeed.text) * Time.deltaTime);
-                yield return null;
-            }
-        }
-
-        /// <summary>
-        /// Scroll the time scrubber automaticly
-        /// </summary>
-        /// <returns></returns>
-        private IEnumerator ScrollTimeScrubberAutomaticly()
-        {
-            while(true)
-            {
-                timeScrubber.ScrollTimeScrubber(0.1f * int.Parse(inputFieldPlaySpeed.text) * Time.deltaTime);
-                yield return null;
-            }
-        }
-
+        
         /// <summary>
         /// Updates the current date inputfield text to currentDate datetime value
         /// </summary>
@@ -576,11 +552,27 @@ namespace Netherlands3D.Timeline
             // Now update each visible time period
             foreach(var item in visibleTimePeriodsUI.Values)
             {
-                float xL = EventUIGetPosX(item.timePeriod.startDate, false);
-                //Debug.LogWarning(visableDateLeft + " XL " + xL);
-                float xR = EventUIGetPosX(item.timePeriod.endDate, true);
-                //Debug.LogWarning(visableDateRight + " XR " + xR);
-                item.UpdateUI(xL, xR);
+                // Get left and right x positions correlating to the bar
+                // but check if no *X timeunit is used
+                float xL = 0, xR = 0;
+                if(timeUnit == TimeUnit.Unit.year5 || timeUnit == TimeUnit.Unit.year10)
+                {
+                    // *X used (as in 5 years, 10 years etc)
+                    // Get the closest year of the timebar & stick it 2 that
+                    DateTime dL = TimeUnit.GetClosestDateTime(item.timePeriod.startDate, GetTimeBarDateTimes());
+                    DateTime dR = TimeUnit.GetClosestDateTime(item.timePeriod.endDate, GetTimeBarDateTimes());
+                    xL = EventUIGetPosX(dL, false);
+                    xR = EventUIGetPosX(dR, true);
+                }
+                else
+                {
+                    // Normal
+                    xL = EventUIGetPosX(item.timePeriod.startDate, false);
+                    //Debug.LogWarning(visableDateLeft + " XL " + xL);
+                    xR = EventUIGetPosX(item.timePeriod.endDate, true);
+                    //Debug.LogWarning(visableDateRight + " XR " + xR);
+                }
+                item.UpdateUI(xL, xR); // some wierd bug setting it off by some pixels, so applied ductapefix of -16
 
                 // Check the time period events
                 // Current Time Enter
@@ -632,6 +624,7 @@ namespace Netherlands3D.Timeline
             // Correct dates
             visableDateLeft = new DateTime(visableDateLeft.Year, visableDateLeft.Month, visableDateLeft.Day, 0, 0, 0);
             visableDateRight = new DateTime(visableDateRight.Year, visableDateRight.Month, visableDateRight.Day, 0, 0, 0);
+            //print(visableDateLeft + " - " + visableDateRight);
 
             UpdateTimePeriods();
         }
@@ -666,7 +659,7 @@ namespace Netherlands3D.Timeline
                     scrollRectTimePeriodLayers.enabled = false;
                     scrollRectLayers.enabled = false;
                     ScrollTimeBar(Vector3.Distance(mouseDownPosition, Input.mousePosition) * dirX * mouseSensitivity * UnityEngine.Time.deltaTime);
-                    PlayScroll(false);
+                    playback.PlayScroll(false);
                 }
                 else
                 {

@@ -13,13 +13,13 @@ MonoBehaviour:
   m_Name: Timeline Time Period
   m_EditorClassIdentifier: 
   timePeriod:
-    name: Test
+    name: Boomwortels
     description: Hello this is a test time period
     startDate:
-      dateTimeString: 2020/01/01
+      dateTimeString: 2010-01-01
     endDate:
-      dateTimeString: 2021/01/01
-    layer: Not Working
+      dateTimeString: 2060-01-01
+    layer: Boomwortels
     eventPressed:
       m_PersistentCalls:
         m_Calls: []
